@@ -1,0 +1,146 @@
+package main
+
+import (
+	core "Akash/core"
+	"encoding/json"
+	"flag"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+)
+
+func loadConfig(path string) (*core.UserConfig, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var Config core.UserConfig
+	if err := json.NewDecoder(file).Decode(&Config); err != nil {
+		return nil, err
+	}
+	return &Config, nil
+}
+
+func main() {
+	configPath := flag.String("Config", "", "Path to Config file (JSON)")
+	flag.Parse()
+
+	if strings.TrimSpace(*configPath) == "" {
+		log.Fatal("Please provide a Config file using -Config flag")
+	}
+
+	cfg, err := loadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Failed to load Config: %v", err)
+	}
+
+	if len(cfg.Backends) == 0 {
+		log.Fatal("No Backends provided in Config")
+	}
+
+	if strings.TrimSpace(cfg.Port) == "" {
+		cfg.Port = ":1902"
+	}
+
+	var backendObjs []*core.Backend
+	for _, address := range cfg.Backends {
+		backendObjs = append(backendObjs,
+			&core.Backend{
+				Address:   address,
+				IsHealthy: true,
+			})
+	}
+
+	lb := &core.LoadBalancer{
+		Config:          cfg,
+		Algo:            core.ParseAlgorithm(cfg.Algorithm),
+		Backends:        backendObjs,
+		ConnectionCount: 0,
+		Index:           -1,
+		BackendCounts:   make([]int32, len(cfg.Backends)),
+	}
+	backendAddrs := []string{}
+	for _, b := range backendObjs {
+		backendAddrs = append(backendAddrs, b.Address)
+	}
+	log.Printf("Akash started on %s with Backends: %v", lb.Config.Port, backendAddrs)
+
+	listenAddr := net.JoinHostPort(cfg.Host, cfg.Port)
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Fatalf("Failed to listen: %v", err)
+	}
+	defer listener.Close()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		for {
+			clientConn, err := listener.Accept()
+			if err != nil {
+				if strings.Contains(err.Error(), "use of closed network connection") {
+					return
+				}
+				if opErr, ok := err.(*net.OpError); ok && !opErr.Temporary() {
+					break
+				}
+				log.Printf("Accept error: %v", err)
+				continue
+			}
+
+			if atomic.LoadInt32(&lb.ConnectionCount) >= int32(lb.Config.MaxConnections) {
+				log.Printf("Max connections reached (%d), rejecting client %s", lb.Config.MaxConnections, clientConn.RemoteAddr())
+				clientConn.Close()
+				continue
+			}
+
+			log.Printf("New client connected: %s", clientConn.RemoteAddr())
+			backend, release := lb.GetNextBackend(clientConn.RemoteAddr().String())
+
+			if backend == nil {
+				log.Println("No backend available")
+				clientConn.Close()
+				continue
+			}
+
+			backendConn, err := net.Dial("tcp", backend.Address)
+			if err != nil {
+				log.Printf("Failed to connect to backend %s: %v", backend.Address, err)
+				clientConn.Close()
+				continue
+			}
+
+			timeout := time.Duration(lb.Config.TimeoutSeconds) * time.Second
+			clientConn.SetDeadline(time.Now().Add(timeout))
+			backendConn.SetDeadline(time.Now().Add(timeout))
+
+			log.Printf("Routing client [%s] -> Backend [%v]", clientConn.RemoteAddr(), backend.Address)
+
+			go func() {
+				defer clientConn.Close()
+				defer backendConn.Close()
+				release()
+				io.Copy(backendConn, clientConn)
+			}()
+
+			go func() {
+				defer clientConn.Close()
+				defer backendConn.Close()
+				release()
+				io.Copy(clientConn, backendConn)
+			}()
+		}
+	}()
+
+	<-sigCh
+	log.Println("🔻 Akash shutting down gracefully...")
+}
