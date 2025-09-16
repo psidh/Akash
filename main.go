@@ -1,8 +1,8 @@
 package main
 
 import (
+	config "Akash/config"
 	core "Akash/core"
-	"encoding/json"
 	"flag"
 	"io"
 	"log"
@@ -15,29 +15,15 @@ import (
 	"time"
 )
 
-func loadConfig(path string) (*core.UserConfig, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var Config core.UserConfig
-	if err := json.NewDecoder(file).Decode(&Config); err != nil {
-		return nil, err
-	}
-	return &Config, nil
-}
-
 func main() {
-	configPath := flag.String("Config", "", "Path to Config file (JSON)")
+	configPath := flag.String("config", "", "Path to Config file (JSON)")
 	flag.Parse()
 
 	if strings.TrimSpace(*configPath) == "" {
 		log.Fatal("Please provide a Config file using -Config flag")
 	}
 
-	cfg, err := loadConfig(*configPath)
+	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load Config: %v", err)
 	}

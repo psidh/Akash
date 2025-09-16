@@ -38,10 +38,6 @@ Akash
 todo.md
 features.md
 
-
-./src/Akash
-./src/config
-
 config.json
 
-config
+example/
