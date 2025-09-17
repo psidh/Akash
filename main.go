@@ -4,7 +4,6 @@ import (
 	config "Akash/config"
 	core "Akash/core"
 	"flag"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -53,6 +52,7 @@ func main() {
 		ConnectionCount: 0,
 		Index:           -1,
 		BackendCounts:   make([]int32, len(cfg.Backends)),
+		BackendFails:    make([]int32, len(cfg.Backends)),
 	}
 	backendAddrs := []string{}
 	for _, b := range backendObjs {
@@ -119,36 +119,11 @@ func main() {
 
 			log.Printf("Routing client [%s] -> Backend [%v]", clientConn.RemoteAddr(), backend.Address)
 
-			go proxy(clientConn, backendConn, &bufPool, release)
-			go proxy(backendConn, clientConn, &bufPool, release)
+			go core.Proxy(clientConn, backendConn, &bufPool, release)
+			go core.Proxy(backendConn, clientConn, &bufPool, release)
 		}
 	}()
 
 	<-sigCh
 	log.Println("🔻 Akash shutting down gracefully...")
-}
-
-func proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
-	defer release()
-
-	tcpSrc, srcOK := src.(*net.TCPConn)
-	tcpDst, dstOK := dst.(*net.TCPConn)
-
-	buf := pool.Get().([]byte)
-	defer pool.Put(buf)
-
-	for {
-		n, err := tcpSrc.Read(buf)
-		if n > 0 {
-			if _, wErr := dst.Write(buf[:n]); wErr != nil {
-				break
-			}
-		}
-		if err != nil {
-			if err == io.EOF && srcOK && dstOK {
-				tcpDst.CloseWrite()
-			}
-			break
-		}
-	}
 }

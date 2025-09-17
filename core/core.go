@@ -45,7 +45,7 @@ type LoadBalancer struct {
 	ConnectionCount int32
 	Index           int32
 	BackendCounts   []int32
-	BackendFails    []int
+	BackendFails    []int32
 }
 
 func ParseAlgorithm(name string) Algorithm {
