@@ -78,6 +78,8 @@ func main() {
 		},
 	}
 	metrics.StartMetricsServer(":9100")
+	var wg sync.WaitGroup
+
 	go func() {
 		for {
 			clientConn, err := listener.Accept()
@@ -107,6 +109,7 @@ func main() {
 				once.Do(func() {
 					originalRelease()
 					metrics.ActiveConns.Dec()
+					wg.Done()
 				})
 			}
 
@@ -124,6 +127,7 @@ func main() {
 				clientConn.Close()
 				continue
 			}
+			wg.Add(2)
 
 			metrics.ActiveConns.Inc()
 			metrics.PerBackendServed.WithLabelValues(backend.Address).Inc()
@@ -142,4 +146,7 @@ func main() {
 
 	<-sigCh
 	log.Println("🔻 Akash shutting down gracefully...")
+	listener.Close()
+	wg.Wait()
+	log.Println("All connections closed.")
 }
