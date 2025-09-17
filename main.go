@@ -58,6 +58,7 @@ func main() {
 		backendAddrs = append(backendAddrs, b.Address)
 	}
 	log.Printf("Akash started on %s with Backends: %v", lb.Config.Port, backendAddrs)
+	core.StartHealthChecks(lb)
 
 	listenAddr := net.JoinHostPort(cfg.Host, cfg.Port)
 	listener, err := net.Listen("tcp", listenAddr)

@@ -7,15 +7,19 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type UserConfig struct {
-	Host           string   `json:"host"`
-	Port           string   `json:"listen"`
-	Backends       []string `json:"Backends"`
-	Algorithm      string   `json:"algorithm"`
-	MaxConnections int      `json:"max_connections"`
-	TimeoutSeconds int      `json:"timeout_seconds"`
+	Host            string   `json:"host"`
+	Port            string   `json:"listen"`
+	Backends        []string `json:"Backends"`
+	Algorithm       string   `json:"algorithm"`
+	MaxConnections  int      `json:"max_connections"`
+	TimeoutSeconds  int      `json:"timeout_seconds"`
+	HealthCheckPath string   `json:"health_check_path"`
+	HealthCheckPort string   `json:"health_check_port"`
+	HealthCheckFreq int      `json:"health_check_freq"`
 }
 
 type Backend struct {
@@ -23,6 +27,7 @@ type Backend struct {
 	IsHealthy         bool
 	ActiveConnections int32
 	mutex             sync.Mutex
+	LastChecked       time.Time
 }
 
 type Algorithm int
@@ -42,7 +47,6 @@ type LoadBalancer struct {
 	BackendCounts   []int32
 }
 
-
 func ParseAlgorithm(name string) Algorithm {
 	switch strings.ToLower(name) {
 	case "round_robin":
@@ -57,15 +61,26 @@ func ParseAlgorithm(name string) Algorithm {
 	}
 }
 
-
 func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) {
 	var idx int
 	var backend *Backend
 
 	switch lb.Algo {
 	case RoundRobin:
-		idx = int(atomic.AddInt32(&lb.Index, 1)) % len(lb.Backends)
-		backend = lb.Backends[idx]
+
+		for attempts := 0; attempts < len(lb.Backends); attempts++ {
+			idx := int(atomic.AddInt32(&lb.Index, 1)) % len(lb.Backends)
+
+			candidate := lb.Backends[idx]
+
+			candidate.mutex.Lock()
+			healthy := candidate.IsHealthy
+			candidate.mutex.Unlock()
+			if healthy {
+				backend = candidate
+				break
+			}
+		}
 
 	case LeastConnections:
 		var minIdx int
@@ -107,8 +122,19 @@ func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) 
 		backend = lb.Backends[idx]
 
 	default:
-		idx = int(atomic.AddInt32(&lb.Index, 1)) % len(lb.Backends)
-		backend = lb.Backends[idx]
+		for attempts := 0; attempts < len(lb.Backends); attempts++ {
+			idx := int(atomic.AddInt32(&lb.Index, 1)) % len(lb.Backends)
+
+			candidate := lb.Backends[idx]
+
+			candidate.mutex.Lock()
+			healthy := candidate.IsHealthy
+			candidate.mutex.Unlock()
+			if healthy {
+				backend = candidate
+				break
+			}
+		}
 	}
 
 	atomic.AddInt32(&lb.ConnectionCount, 1)
@@ -121,5 +147,51 @@ func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) 
 		atomic.AddInt32(&lb.ConnectionCount, -1)
 	}
 
+	if backend == nil {
+		return nil, func() {}
+	}
+
 	return backend, release
+}
+
+func StartHealthChecks(lb *LoadBalancer) {
+	freq := time.Duration(lb.Config.HealthCheckFreq) * time.Second
+
+	if freq == 0 {
+		freq = 10 * time.Second
+	}
+
+	go func() {
+		for {
+			for _, backend := range lb.Backends {
+				go checkBackend(backend, lb.Config)
+
+			}
+			time.Sleep(freq)
+		}
+	}()
+}
+
+func checkBackend(backend *Backend, userConfig *UserConfig) {
+	conn, err := net.DialTimeout("tcp", backend.Address, 2*time.Second)
+
+	if err != nil {
+		setBackendHealth(backend, false)
+		return
+	}
+
+	conn.Close()
+	setBackendHealth(backend, true)
+}
+
+func setBackendHealth(backend *Backend, healthy bool) {
+
+	backend.mutex.Lock()
+
+	defer backend.mutex.Unlock()
+
+	if backend.IsHealthy != healthy {
+		log.Printf("Backend %s health changed → %v", backend.Address, healthy)
+	}
+	backend.IsHealthy = healthy
 }
