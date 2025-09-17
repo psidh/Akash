@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -70,6 +71,12 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	bufPool := sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 32*1024)
+		},
+	}
+
 	go func() {
 		for {
 			clientConn, err := listener.Accept()
@@ -112,22 +119,36 @@ func main() {
 
 			log.Printf("Routing client [%s] -> Backend [%v]", clientConn.RemoteAddr(), backend.Address)
 
-			go func() {
-				defer clientConn.Close()
-				defer backendConn.Close()
-				release()
-				io.Copy(backendConn, clientConn)
-			}()
-
-			go func() {
-				defer clientConn.Close()
-				defer backendConn.Close()
-				release()
-				io.Copy(clientConn, backendConn)
-			}()
+			go proxy(clientConn, backendConn, &bufPool, release)
+			go proxy(backendConn, clientConn, &bufPool, release)
 		}
 	}()
 
 	<-sigCh
 	log.Println("🔻 Akash shutting down gracefully...")
+}
+
+func proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
+	defer release()
+
+	tcpSrc, srcOK := src.(*net.TCPConn)
+	tcpDst, dstOK := dst.(*net.TCPConn)
+
+	buf := pool.Get().([]byte)
+	defer pool.Put(buf)
+
+	for {
+		n, err := tcpSrc.Read(buf)
+		if n > 0 {
+			if _, wErr := dst.Write(buf[:n]); wErr != nil {
+				break
+			}
+		}
+		if err != nil {
+			if err == io.EOF && srcOK && dstOK {
+				tcpDst.CloseWrite()
+			}
+			break
+		}
+	}
 }
