@@ -38,10 +38,10 @@ func main() {
 	}
 
 	var backendObjs []*core.Backend
-	for _, address := range cfg.Backends {
+	for _, backend := range cfg.Backends {
 		backendObjs = append(backendObjs,
 			&core.Backend{
-				Address:   address,
+				Address:   backend.Address,
 				IsHealthy: true,
 			})
 	}

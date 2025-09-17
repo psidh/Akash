@@ -18,11 +18,11 @@ func ReloadConfig(lb *core.LoadBalancer, configPath string) {
 	lb.Config = cfg
 
 	var newBackends []*core.Backend
-	for _, address := range cfg.Backends {
+	for _, backend := range cfg.Backends {
 
 		found := false
 		for _, oldB := range lb.Backends {
-			if oldB.Address == address {
+			if oldB.Address == backend.Address {
 				newBackends = append(newBackends, oldB)
 				found = true
 				break
@@ -30,7 +30,7 @@ func ReloadConfig(lb *core.LoadBalancer, configPath string) {
 		}
 		if !found {
 			newBackends = append(newBackends, &core.Backend{
-				Address:   address,
+				Address:   backend.Address,
 				IsHealthy: true,
 			})
 		}

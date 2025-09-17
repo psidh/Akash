@@ -11,23 +11,25 @@ import (
 )
 
 type UserConfig struct {
-	Host            string   `json:"host"`
-	Port            string   `json:"listen"`
-	Backends        []string `json:"Backends"`
-	Algorithm       string   `json:"algorithm"`
-	MaxConnections  int      `json:"max_connections"`
-	TimeoutSeconds  int      `json:"timeout_seconds"`
-	HealthCheckPath string   `json:"health_check_path"`
-	HealthCheckPort string   `json:"health_check_port"`
-	HealthCheckFreq int      `json:"health_check_freq"`
+	Host            string    `json:"host"`
+	Port            string    `json:"listen"`
+	Backends        []Backend `json:"Backends"`
+	Algorithm       string    `json:"algorithm"`
+	MaxConnections  int       `json:"max_connections"`
+	TimeoutSeconds  int       `json:"timeout_seconds"`
+	HealthCheckPath string    `json:"health_check_path"`
+	HealthCheckPort string    `json:"health_check_port"`
+	HealthCheckFreq int       `json:"health_check_freq"`
 }
 
 type Backend struct {
-	Address           string
-	IsHealthy         bool
-	ActiveConnections int32
+	Address           string `json:"address"`
+	Weight            int    `json:"weight"`
+	IsHealthy         bool   `json:"-"`
+	ActiveConnections int32  `json:"-"`
 	mutex             sync.Mutex
-	LastChecked       time.Time
+	LastChecked       time.Time `json:"-"`
+	CurrentWeight     int       `json:"-"`
 }
 
 type Algorithm int
@@ -36,6 +38,7 @@ const (
 	RoundRobin Algorithm = iota
 	LeastConnections
 	IPHash
+	WeightedRoundRobin
 )
 
 type LoadBalancer struct {
@@ -56,6 +59,8 @@ func ParseAlgorithm(name string) Algorithm {
 		return LeastConnections
 	case "ip_hash":
 		return IPHash
+	case "w_round_robin":
+		return WeightedRoundRobin
 	default:
 		log.Printf("Unknown algorithm %s, defaulting to round robin", name)
 		return RoundRobin
@@ -121,6 +126,42 @@ func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, int, fun
 
 		idx = int(hashVal) % len(lb.Backends)
 		backend = lb.Backends[idx]
+
+	case WeightedRoundRobin:
+		var total int
+		var selected *Backend
+		var selectedIdx int
+
+		for _, b := range lb.Backends {
+			total += b.Weight
+		}
+
+		maxWeight := -1
+
+		for i, b := range lb.Backends {
+			b.mutex.Lock()
+			if !b.IsHealthy {
+				b.mutex.Unlock()
+				continue
+			}
+
+			b.CurrentWeight += b.Weight
+
+			if b.CurrentWeight > maxWeight {
+				maxWeight = b.CurrentWeight
+				selected = b
+				selectedIdx = i
+			}
+			b.mutex.Unlock()
+		}
+
+		if selected != nil {
+			selected.mutex.Lock()
+			selected.CurrentWeight -= total
+			selected.mutex.Unlock()
+			backend = selected
+			idx = selectedIdx
+		}
 
 	default:
 		for attempts := 0; attempts < len(lb.Backends); attempts++ {
