@@ -3,6 +3,7 @@ package core
 import (
 	"log"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,8 +16,8 @@ func StartHealthChecks(lb *LoadBalancer) {
 
 	go func() {
 		for {
-			for _, backend := range lb.Backends {
-				go checkBackend(backend)
+			for i, backend := range lb.Backends {
+				go checkBackend(backend, lb, i)
 
 			}
 			time.Sleep(freq)
@@ -24,19 +25,20 @@ func StartHealthChecks(lb *LoadBalancer) {
 	}()
 }
 
-func checkBackend(backend *Backend) {
-	conn, err := net.DialTimeout("tcp", backend.Address, 2*time.Second)
+func checkBackend(backend *Backend, lb *LoadBalancer, index int) {
+	timeout := time.Duration(lb.Config.TimeoutSeconds) * time.Second
+	conn, err := net.DialTimeout("tcp", backend.Address, timeout)
 
 	if err != nil {
-		setBackendHealth(backend, false)
+		setBackendHealth(backend, false, lb, index)
 		return
 	}
 
 	conn.Close()
-	setBackendHealth(backend, true)
+	setBackendHealth(backend, true, lb, index)
 }
 
-func setBackendHealth(backend *Backend, healthy bool) {
+func setBackendHealth(backend *Backend, healthy bool, lb *LoadBalancer, index int) {
 
 	backend.mutex.Lock()
 
@@ -46,4 +48,8 @@ func setBackendHealth(backend *Backend, healthy bool) {
 		log.Printf("Backend %s health changed → %v", backend.Address, healthy)
 	}
 	backend.IsHealthy = healthy
+
+	if healthy {
+		atomic.StoreInt32(&lb.BackendFails[index], 0)
+	}
 }

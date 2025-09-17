@@ -70,7 +70,7 @@ func main() {
 	defer listener.Close()
 
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	bufPool := sync.Pool{
 		New: func() interface{} {
@@ -144,9 +144,17 @@ func main() {
 		}
 	}()
 
-	<-sigCh
-	log.Println("🔻 Akash shutting down gracefully...")
-	listener.Close()
-	wg.Wait()
-	log.Println("All connections closed.")
+	for {
+		sig := <-sigCh
+		switch sig {
+		case syscall.SIGHUP:
+			config.ReloadConfig(lb, *configPath)
+		case syscall.SIGINT, syscall.SIGTERM:
+			log.Println("🔻 Akash shutting down gracefully...")
+			listener.Close()
+			wg.Wait()
+			log.Println("All connections closed.")
+			return
+		}
+	}
 }
