@@ -16,7 +16,7 @@ func StartHealthChecks(lb *LoadBalancer) {
 	go func() {
 		for {
 			for _, backend := range lb.Backends {
-				go checkBackend(backend, lb.Config)
+				go checkBackend(backend)
 
 			}
 			time.Sleep(freq)
@@ -24,7 +24,7 @@ func StartHealthChecks(lb *LoadBalancer) {
 	}()
 }
 
-func checkBackend(backend *Backend, userConfig *UserConfig) {
+func checkBackend(backend *Backend) {
 	conn, err := net.DialTimeout("tcp", backend.Address, 2*time.Second)
 
 	if err != nil {
