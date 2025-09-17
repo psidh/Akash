@@ -1,6 +1,7 @@
 package core
 
 import (
+	"Akash/metrics"
 	"io"
 	"net"
 	"sync"
@@ -19,12 +20,15 @@ func Proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
 		n, err := tcpSrc.Read(buf)
 		if n > 0 {
 			if _, wErr := dst.Write(buf[:n]); wErr != nil {
+				metrics.PerBackendFails.WithLabelValues(dst.RemoteAddr().String()).Inc()
 				break
 			}
 		}
 		if err != nil {
 			if err == io.EOF && srcOK && dstOK {
 				tcpDst.CloseWrite()
+			} else {
+				metrics.PerBackendFails.WithLabelValues(dst.RemoteAddr().String()).Inc()
 			}
 			break
 		}
