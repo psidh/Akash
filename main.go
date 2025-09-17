@@ -3,6 +3,7 @@ package main
 import (
 	config "Akash/config"
 	core "Akash/core"
+	metrics "Akash/metrics"
 	"flag"
 	"log"
 	"net"
@@ -76,7 +77,7 @@ func main() {
 			return make([]byte, 32*1024)
 		},
 	}
-
+	metrics.StartMetricsServer(":9100")
 	go func() {
 		for {
 			clientConn, err := listener.Accept()
@@ -98,7 +99,16 @@ func main() {
 			}
 
 			log.Printf("New client connected: %s", clientConn.RemoteAddr())
-			backend, release := lb.GetNextBackend(clientConn.RemoteAddr().String())
+			backend, idx, release := lb.GetNextBackend(clientConn.RemoteAddr().String())
+
+			var once sync.Once
+			originalRelease := release
+			release = func() {
+				once.Do(func() {
+					originalRelease()
+					metrics.ActiveConns.Dec()
+				})
+			}
 
 			if backend == nil {
 				log.Println("No backend available")
@@ -109,15 +119,21 @@ func main() {
 			backendConn, err := net.Dial("tcp", backend.Address)
 			if err != nil {
 				log.Printf("Failed to connect to backend %s: %v", backend.Address, err)
+				atomic.AddInt32(&lb.BackendFails[idx], 1)
+				metrics.PerBackendFails.WithLabelValues(backend.Address).Inc()
 				clientConn.Close()
 				continue
 			}
+
+			metrics.ActiveConns.Inc()
+			metrics.PerBackendServed.WithLabelValues(backend.Address).Inc()
 
 			timeout := time.Duration(lb.Config.TimeoutSeconds) * time.Second
 			clientConn.SetDeadline(time.Now().Add(timeout))
 			backendConn.SetDeadline(time.Now().Add(timeout))
 
 			log.Printf("Routing client [%s] -> Backend [%v]", clientConn.RemoteAddr(), backend.Address)
+			log.Printf("event=route client=%s backend=%s active_conns=%d", clientConn.RemoteAddr(), backend.Address, atomic.LoadInt32(&lb.ConnectionCount))
 
 			go core.Proxy(clientConn, backendConn, &bufPool, release)
 			go core.Proxy(backendConn, clientConn, &bufPool, release)

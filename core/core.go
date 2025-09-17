@@ -62,7 +62,7 @@ func ParseAlgorithm(name string) Algorithm {
 	}
 }
 
-func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) {
+func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, int, func()) {
 	var idx int
 	var backend *Backend
 
@@ -139,6 +139,7 @@ func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) 
 	}
 
 	atomic.AddInt32(&lb.ConnectionCount, 1)
+	atomic.AddInt32(&lb.BackendCounts[idx], 1)
 
 	release := func() {
 		backend.mutex.Lock()
@@ -149,8 +150,8 @@ func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, func()) 
 	}
 
 	if backend == nil {
-		return nil, func() {}
+		return nil, -1, func() {}
 	}
 
-	return backend, release
+	return backend, idx, release
 }
