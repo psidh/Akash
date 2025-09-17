@@ -20,6 +20,8 @@ type UserConfig struct {
 	HealthCheckPath string    `json:"health_check_path"`
 	HealthCheckPort string    `json:"health_check_port"`
 	HealthCheckFreq int       `json:"health_check_freq"`
+	TLSCertFile     string    `json:"tls_cert_file"`
+	TLSKeyFile      string    `json:"tls_key_file"`
 }
 
 type Backend struct {

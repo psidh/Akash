@@ -4,6 +4,7 @@ import (
 	config "Akash/config"
 	core "Akash/core"
 	metrics "Akash/metrics"
+	"crypto/tls"
 	"flag"
 	"log"
 	"net"
@@ -15,6 +16,8 @@ import (
 	"syscall"
 	"time"
 )
+
+var currentTLSConfig atomic.Value
 
 func main() {
 	configPath := flag.String("config", "", "Path to Config file (JSON)")
@@ -63,7 +66,39 @@ func main() {
 	core.StartHealthChecks(lb)
 
 	listenAddr := net.JoinHostPort(cfg.Host, cfg.Port)
-	listener, err := net.Listen("tcp", listenAddr)
+
+	var listener net.Listener
+
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+
+		if err != nil {
+			log.Fatalf("Failed to load TLS cert/key: %v", err)
+		}
+
+		tlsConfig := &tls.Config{
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				c := currentTLSConfig.Load().(*tls.Certificate)
+				return c, nil
+			},
+		}
+		currentTLSConfig.Store(&cert)
+
+		listener, err = tls.Listen("tcp", listenAddr, tlsConfig)
+
+		if err != nil {
+			log.Fatalf("Failed to start TLS listener: %v", err)
+		}
+		log.Printf("🔒 TLS enabled: Listening on https://%s", listenAddr)
+	} else {
+
+		listener, err = net.Listen("tcp", listenAddr)
+		if err != nil {
+			log.Fatalf("Failed to listen: %v", err)
+		}
+		log.Printf("Listening on tcp://%s", listenAddr)
+	}
+
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}

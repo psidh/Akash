@@ -2,8 +2,12 @@ package config
 
 import (
 	core "Akash/core"
+	"crypto/tls"
 	"log"
+	"sync/atomic"
 )
+
+var currentTLSConfig atomic.Value
 
 func ReloadConfig(lb *core.LoadBalancer, configPath string) {
 	log.Println("🔄 Reloading configuration...")
@@ -12,6 +16,16 @@ func ReloadConfig(lb *core.LoadBalancer, configPath string) {
 	if err != nil {
 		log.Printf("Failed to reload config: %v", err)
 		return
+	}
+
+	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			log.Printf("Failed to reload TLS certs: %v", err)
+		} else {
+			currentTLSConfig.Store(&cert)
+			log.Println("🔒 TLS certs reloaded")
+		}
 	}
 
 	lb.Algo = core.ParseAlgorithm(cfg.Algorithm)
