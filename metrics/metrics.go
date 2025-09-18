@@ -32,15 +32,13 @@ var (
 )
 
 func StartMetricsServer(addr string) {
-	reg := prometheus.NewRegistry()
-
-	reg.MustRegister(ActiveConns, PerBackendServed, PerBackendFails)
+	prometheus.MustRegister(ActiveConns, PerBackendServed, PerBackendFails)
 
 	go func() {
-		http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-		log.Printf("Prometheus metrics available at %s/metrics", addr)
+		http.Handle("/metrics", promhttp.Handler())
+		log.Printf("[INFO] Prometheus metrics available at %s/metrics", addr)
 		if err := http.ListenAndServe(addr, nil); err != nil {
-			log.Printf("Prometheus metrics server error: %v", err)
+			log.Printf("[ERROR] Prometheus metrics server error: %v", err)
 		}
 	}()
 }

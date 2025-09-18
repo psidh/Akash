@@ -72,6 +72,9 @@ func ParseAlgorithm(name string) Algorithm {
 }
 
 func (lb *LoadBalancer) GetNextBackend(clientAddress, path string) (*Backend, int, func()) {
+	if len(lb.Backends) == 0 {
+		return nil, -1, func() {}
+	}
 	var idx int
 	var backend *Backend
 
