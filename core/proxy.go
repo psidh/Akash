@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-func Proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
+func Proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func(), backend string) {
 	defer release()
 
 	tcpSrc, srcOK := src.(*net.TCPConn)
@@ -20,7 +20,7 @@ func Proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
 		n, err := tcpSrc.Read(buf)
 		if n > 0 {
 			if _, wErr := dst.Write(buf[:n]); wErr != nil {
-				metrics.PerBackendFails.WithLabelValues(dst.RemoteAddr().String()).Inc()
+				metrics.PerBackendFails.WithLabelValues(backend).Inc()
 				break
 			}
 		}
@@ -28,7 +28,7 @@ func Proxy(src net.Conn, dst net.Conn, pool *sync.Pool, release func()) {
 			if err == io.EOF && srcOK && dstOK {
 				tcpDst.CloseWrite()
 			} else {
-				metrics.PerBackendFails.WithLabelValues(dst.RemoteAddr().String()).Inc()
+				metrics.PerBackendFails.WithLabelValues(backend).Inc()
 			}
 			break
 		}

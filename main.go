@@ -4,6 +4,7 @@ import (
 	config "Akash/config"
 	core "Akash/core"
 	metrics "Akash/metrics"
+	"bufio"
 	"crypto/tls"
 	"flag"
 	"log"
@@ -143,21 +144,21 @@ func main() {
 
 			log.Printf("New client connected: %s", clientConn.RemoteAddr())
 
-			buf := make([]byte, 1024)
-
-			n, err := clientConn.Read(buf)
+			reader := bufio.NewReader(clientConn)
+			line, err := reader.ReadString('\n') 
 			if err != nil {
+				log.Printf("Failed to read request line: %v", err)
 				clientConn.Close()
 				continue
 			}
-
-			reqLine := strings.SplitN(string(buf[:n]), "\r\n", 2)[0]
-			parts := strings.Split(reqLine, " ")
-			path := "/"
+			line = strings.TrimSpace(line)
+			parts := strings.Split(line, " ")
+			method, path := "GET", "/"
 			if len(parts) >= 2 {
+				method = parts[0]
 				path = parts[1]
 			}
-			
+			log.Printf("HTTP request: %s %s", method, path)
 			backend, idx, release := lb.GetNextBackend(clientConn.RemoteAddr().String(), path)
 
 			var once sync.Once
@@ -184,7 +185,7 @@ func main() {
 				clientConn.Close()
 				continue
 			}
-			wg.Add(2)
+			wg.Add(1)
 
 			metrics.ActiveConns.Inc()
 			metrics.PerBackendServed.WithLabelValues(backend.Address).Inc()
@@ -196,8 +197,8 @@ func main() {
 			log.Printf("Routing client [%s] -> Backend [%v]", clientConn.RemoteAddr(), backend.Address)
 			log.Printf("event=route client=%s backend=%s active_conns=%d", clientConn.RemoteAddr(), backend.Address, atomic.LoadInt32(&lb.ConnectionCount))
 
-			go core.Proxy(clientConn, backendConn, &bufPool, release)
-			go core.Proxy(backendConn, clientConn, &bufPool, release)
+			go core.Proxy(clientConn, backendConn, &bufPool, release, backend.Address)
+			go core.Proxy(backendConn, clientConn, &bufPool, release, backend.Address)
 		}
 	}()
 
