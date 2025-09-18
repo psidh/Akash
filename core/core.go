@@ -32,6 +32,7 @@ type Backend struct {
 	mutex             sync.Mutex
 	LastChecked       time.Time `json:"-"`
 	CurrentWeight     int       `json:"-"`
+	Paths             []string  `json:"paths"`
 }
 
 type Algorithm int
@@ -51,6 +52,7 @@ type LoadBalancer struct {
 	Index           int32
 	BackendCounts   []int32
 	BackendFails    []int32
+	PathRoutes      map[string]*Backend
 }
 
 func ParseAlgorithm(name string) Algorithm {
@@ -69,9 +71,32 @@ func ParseAlgorithm(name string) Algorithm {
 	}
 }
 
-func (lb *LoadBalancer) GetNextBackend(clientAddress string) (*Backend, int, func()) {
+func (lb *LoadBalancer) GetNextBackend(clientAddress, path string) (*Backend, int, func()) {
 	var idx int
 	var backend *Backend
+
+	// path ? path based routing : lb algorithm based routing
+	for p, b := range lb.PathRoutes {
+		if strings.HasPrefix(path, p) {
+			b.mutex.Lock()
+			if !b.IsHealthy {
+				b.mutex.Unlock()
+				continue
+			}
+			b.ActiveConnections++
+			b.mutex.Unlock()
+
+			backend = b
+
+			for i, backendCheck := range lb.Backends {
+				if backendCheck == backend {
+					idx = i
+					break
+				}
+			}
+			break
+		}
+	}
 
 	switch lb.Algo {
 	case RoundRobin:

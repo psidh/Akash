@@ -10,7 +10,7 @@ import (
 var currentTLSConfig atomic.Value
 
 func ReloadConfig(lb *core.LoadBalancer, configPath string) {
-	log.Println("🔄 Reloading configuration...")
+	log.Println("Reloading configuration...")
 
 	cfg, err := LoadConfig(configPath)
 	if err != nil {

@@ -57,6 +57,12 @@ func main() {
 		Index:           -1,
 		BackendCounts:   make([]int32, len(cfg.Backends)),
 		BackendFails:    make([]int32, len(cfg.Backends)),
+		PathRoutes:      make(map[string]*core.Backend),
+	}
+	for _, backend := range backendObjs {
+		for _, path := range backend.Paths {
+			lb.PathRoutes[path] = backend
+		}
 	}
 	backendAddrs := []string{}
 	for _, b := range backendObjs {
@@ -89,7 +95,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to start TLS listener: %v", err)
 		}
-		log.Printf("🔒 TLS enabled: Listening on https://%s", listenAddr)
+		log.Printf("TLS enabled: Listening on https://%s", listenAddr)
 	} else {
 
 		listener, err = net.Listen("tcp", listenAddr)
@@ -136,7 +142,23 @@ func main() {
 			}
 
 			log.Printf("New client connected: %s", clientConn.RemoteAddr())
-			backend, idx, release := lb.GetNextBackend(clientConn.RemoteAddr().String())
+
+			buf := make([]byte, 1024)
+
+			n, err := clientConn.Read(buf)
+			if err != nil {
+				clientConn.Close()
+				continue
+			}
+
+			reqLine := strings.SplitN(string(buf[:n]), "\r\n", 2)[0]
+			parts := strings.Split(reqLine, " ")
+			path := "/"
+			if len(parts) >= 2 {
+				path = parts[1]
+			}
+			
+			backend, idx, release := lb.GetNextBackend(clientConn.RemoteAddr().String(), path)
 
 			var once sync.Once
 			originalRelease := release
@@ -185,7 +207,7 @@ func main() {
 		case syscall.SIGHUP:
 			config.ReloadConfig(lb, *configPath)
 		case syscall.SIGINT, syscall.SIGTERM:
-			log.Println("🔻 Akash shutting down gracefully...")
+			log.Println("Akash shutting down...")
 			listener.Close()
 			wg.Wait()
 			log.Println("All connections closed.")
