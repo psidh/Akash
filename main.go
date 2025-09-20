@@ -61,7 +61,7 @@ func main() {
 		BackendFails:    make([]int32, len(cfg.Backends)),
 		PathRoutes:      make(map[string]*core.Backend),
 	}
-
+	core.StartHealthChecks(lb)
 	// -------------------- start listener --------------------
 	listenAddr := net.JoinHostPort(cfg.Host, cfg.Port)
 	var listener net.Listener
