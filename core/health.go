@@ -11,7 +11,7 @@ func StartHealthChecks(lb *LoadBalancer) {
 	freq := time.Duration(lb.Config.HealthCheckFreq) * time.Second
 
 	if freq == 0 {
-		freq = 10 * time.Second
+		freq = freq * 19
 	}
 
 	go func() {
